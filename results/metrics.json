@@ -1,0 +1,241 @@
+{
+  "project": "agent-tool-harness",
+  "success_criteria": [
+    {
+      "name": "Task success on held-out test templates (best configuration) minus all-tools baseline (points)",
+      "value": 100.0,
+      "op": ">=",
+      "threshold": 20.0,
+      "threshold_high": null,
+      "passed": true
+    },
+    {
+      "name": "Tool retrieval Recall@5 for the gold next tool",
+      "value": 1.0,
+      "op": ">=",
+      "threshold": 0.9,
+      "threshold_high": null,
+      "passed": true
+    },
+    {
+      "name": "Prompt token reduction vs all-tools baseline",
+      "value": 0.9825097083057116,
+      "op": ">=",
+      "threshold": 0.6,
+      "threshold_high": null,
+      "passed": true
+    },
+    {
+      "name": "Side-effecting tool calls without required confirmation",
+      "value": 0.0,
+      "op": "<=",
+      "threshold": 0.0,
+      "threshold_high": null,
+      "passed": true
+    },
+    {
+      "name": "Schema-valid tool calls",
+      "value": 1.0,
+      "op": ">=",
+      "threshold": 0.98,
+      "threshold_high": null,
+      "passed": true
+    },
+    {
+      "name": "Test coverage",
+      "value": 0.9061707523245985,
+      "op": ">=",
+      "threshold": 0.8,
+      "threshold_high": null,
+      "passed": true
+    }
+  ],
+  "metrics": {
+    "agent": "lexical_grounding",
+    "best_config": "bm25_compact",
+    "success_by_config": {
+      "all_tools": 0.0,
+      "all_tools_compact": 0.0,
+      "bm25": 1.0,
+      "bm25_compact": 1.0,
+      "embed": 1.0,
+      "embed_compact": 1.0,
+      "hierarchical": 1.0,
+      "hierarchical_compact": 1.0
+    },
+    "tokens_per_task_by_config": {
+      "all_tools": 92559.92,
+      "all_tools_compact": 92509.005,
+      "bm25": 1666.05,
+      "bm25_compact": 1618.9,
+      "embed": 1678.575,
+      "embed_compact": 1631.425,
+      "hierarchical": 1666.05,
+      "hierarchical_compact": 1618.9
+    },
+    "wrong_tool_mean_by_config": {
+      "all_tools": 1.8,
+      "all_tools_compact": 1.8,
+      "bm25": 0.0,
+      "bm25_compact": 0.0,
+      "embed": 0.0,
+      "embed_compact": 0.0,
+      "hierarchical": 0.0,
+      "hierarchical_compact": 0.0
+    },
+    "latency_ms_mean_by_config": {
+      "all_tools": 0.98311,
+      "all_tools_compact": 0.8365049999999999,
+      "bm25": 1.29659,
+      "bm25_compact": 1.062365,
+      "embed": 0.45354500000000003,
+      "embed_compact": 0.44701,
+      "hierarchical": 1.038645,
+      "hierarchical_compact": 1.022115
+    },
+    "failure_counts_by_config": {
+      "all_tools": {
+        "wrong_tool": 144,
+        "loop": 56
+      },
+      "all_tools_compact": {
+        "wrong_tool": 144,
+        "loop": 56
+      },
+      "bm25": {
+        "success": 200
+      },
+      "bm25_compact": {
+        "success": 200
+      },
+      "embed": {
+        "success": 200
+      },
+      "embed_compact": {
+        "success": 200
+      },
+      "hierarchical": {
+        "success": 200
+      },
+      "hierarchical_compact": {
+        "success": 200
+      }
+    },
+    "recall_at_5": 1.0,
+    "recall_at_5_by_retriever": {
+      "bm25": 1.0,
+      "embed": 1.0,
+      "hierarchical": 1.0
+    },
+    "dev_recall_at_5_by_retriever": {
+      "embed": 1.0,
+      "hierarchical": 1.0,
+      "bm25": 1.0
+    },
+    "token_reduction": 0.9825097083057116,
+    "success_gap_points": 100.0,
+    "unconfirmed_side_effects": 0,
+    "schema_valid_rate": 1.0,
+    "n_test_tasks": 200,
+    "n_tools": 336,
+    "n_apps": 12,
+    "context_limit_tokens": 2048,
+    "retrieval_k": 5,
+    "seeds": [
+      0
+    ],
+    "resume_numbers": {
+      "n_tools": 336,
+      "best_config": "bm25_compact",
+      "base_success_pct": 0.0,
+      "best_success_pct": 100.0,
+      "recall_at_5": 1.0,
+      "token_cut_pct": 98.3
+    },
+    "oracle_upper_bound": {
+      "success_by_config": {
+        "all_tools": 0.0,
+        "all_tools_compact": 0.0,
+        "bm25": 1.0,
+        "bm25_compact": 1.0,
+        "embed": 1.0,
+        "embed_compact": 1.0,
+        "hierarchical": 1.0,
+        "hierarchical_compact": 1.0
+      },
+      "tokens_per_task_by_config": {
+        "all_tools": 35747.35,
+        "all_tools_compact": 35747.35,
+        "bm25": 1666.05,
+        "bm25_compact": 1618.9,
+        "embed": 1678.575,
+        "embed_compact": 1631.425,
+        "hierarchical": 1666.05,
+        "hierarchical_compact": 1618.9
+      }
+    },
+    "dataset": {
+      "seed": 0,
+      "license": "generated locally by this project",
+      "n_tools": 336,
+      "n_tasks": 400,
+      "n_dev": 200,
+      "n_test": 200,
+      "n_dev_templates": 40,
+      "n_test_templates": 40,
+      "tools_sha256": "9e3ef6bf34df6757a371eb06c49df184fafd62600fb99641532babb779f38366",
+      "tasks_sha256": "7f1087e8c4f1b2ba9a521d94370de09b09601239e7427381231642abadced5ee"
+    }
+  },
+  "baseline": {
+    "config": "all_tools",
+    "agent": "lexical_grounding",
+    "success": 0.0,
+    "tokens_per_task": 92559.92,
+    "description": "Same lexical model with every tool schema in the prompt, no retrieval and no context compaction."
+  },
+  "splits": {
+    "tasks": {
+      "train": 0,
+      "val": 200,
+      "test": 200
+    }
+  },
+  "seeds": [
+    0
+  ],
+  "hardware": {
+    "cpu": "Intel64 Family 6 Model 141 Stepping 1, GenuineIntel",
+    "ram_gb": 15.73,
+    "gpu": null,
+    "python": "3.12.10",
+    "os": "Windows-11-10.0.26300-SP0",
+    "peak_rss_gb": 0.537,
+    "device": "cpu"
+  },
+  "runtime_seconds": 48.664,
+  "success_by_config": {
+    "all_tools": 0.0,
+    "all_tools_compact": 0.0,
+    "bm25": 1.0,
+    "bm25_compact": 1.0,
+    "embed": 1.0,
+    "embed_compact": 1.0,
+    "hierarchical": 1.0,
+    "hierarchical_compact": 1.0
+  },
+  "recall_at_5": 1.0,
+  "tokens_per_task_by_config": {
+    "all_tools": 92559.92,
+    "all_tools_compact": 92509.005,
+    "bm25": 1666.05,
+    "bm25_compact": 1618.9,
+    "embed": 1678.575,
+    "embed_compact": 1631.425,
+    "hierarchical": 1666.05,
+    "hierarchical_compact": 1618.9
+  },
+  "unconfirmed_side_effects": 0,
+  "schema_valid_rate": 1.0,
+  "n_test_tasks": 200
+}

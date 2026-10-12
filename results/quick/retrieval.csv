@@ -1,0 +1,17 @@
+task_id,split,step_index,retriever,gold_tool,rank,hit_at_5
+tpl001-i0,test,0,bm25,calendar.schedule_meeting,1,1
+tpl001-i0,test,0,hierarchical,calendar.schedule_meeting,1,1
+tpl001-i1,test,0,bm25,calendar.schedule_meeting,1,1
+tpl001-i1,test,0,hierarchical,calendar.schedule_meeting,1,1
+tpl001-i2,test,0,bm25,calendar.schedule_meeting,1,1
+tpl001-i2,test,0,hierarchical,calendar.schedule_meeting,1,1
+tpl001-i3,test,0,bm25,calendar.schedule_meeting,1,1
+tpl001-i3,test,0,hierarchical,calendar.schedule_meeting,1,1
+tpl001-i4,test,0,bm25,calendar.schedule_meeting,1,1
+tpl001-i4,test,0,hierarchical,calendar.schedule_meeting,1,1
+tpl003-i0,test,0,bm25,notes.create,1,1
+tpl003-i0,test,0,hierarchical,notes.create,1,1
+tpl003-i1,test,0,bm25,notes.create,1,1
+tpl003-i1,test,0,hierarchical,notes.create,1,1
+tpl003-i2,test,0,bm25,notes.create,1,1
+tpl003-i2,test,0,hierarchical,notes.create,1,1

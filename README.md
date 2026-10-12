@@ -58,7 +58,31 @@ Dev templates are a diagnostic (`results/dev_diagnostics.json`). Reported succes
 The table is written by `python run.py` from `results/metrics.json`. Recompute success as the mean of `success` in `results/episodes.csv` grouped by `config`. Recompute prompt tokens as the mean of `prompt_tokens`. Recompute schema-valid rate as the sum of `schema_valid_calls` divided by the sum of `n_steps` across `episodes.csv` and `oracle_episodes.csv`. Recompute Recall@5 as the mean of `hit_at_5` in `results/retrieval.csv` for the retriever used by the best config. `gate_log.csv` sums to `unconfirmed_side_effects`.
 
 <!-- RESULTS_START -->
-Results appear here after `python run.py`.
+| Config | Task success | Prompt tokens / task | Mean wrong-tool calls |
+| --- | ---: | ---: | ---: |
+| bm25_compact (best) | 100.0% | 1618.9 | 0.00 |
+| hierarchical_compact | 100.0% | 1618.9 | 0.00 |
+| embed_compact | 100.0% | 1631.4 | 0.00 |
+| bm25 | 100.0% | 1666.0 | 0.00 |
+| hierarchical | 100.0% | 1666.0 | 0.00 |
+| embed | 100.0% | 1678.6 | 0.00 |
+| all_tools_compact | 0.0% | 92509.0 | 1.80 |
+| all_tools (baseline) | 0.0% | 92559.9 | 1.80 |
+
+| Retriever | Recall@5 on test |
+| --- | ---: |
+| bm25 | 1.000 |
+| embed | 1.000 |
+| hierarchical | 1.000 |
+
+| Criterion | Value | Threshold | Passed |
+| --- | ---: | ---: | --- |
+| Task success on held-out test templates (best configuration) minus all-tools baseline (points) | 100.0000 | >= 20.0 | True |
+| Tool retrieval Recall@5 for the gold next tool | 1.0000 | >= 0.9 | True |
+| Prompt token reduction vs all-tools baseline | 0.9825 | >= 0.6 | True |
+| Side-effecting tool calls without required confirmation | 0.0000 | <= 0.0 | True |
+| Schema-valid tool calls | 1.0000 | >= 0.98 | True |
+| Test coverage | 0.9062 | >= 0.8 | True |
 <!-- RESULTS_END -->
 
 Plots written next to the metrics file: `success_by_config.png`, `tokens_by_config.png`, `recall_at_5.png`, `failure_types.png`.
@@ -68,6 +92,8 @@ Plots written next to the metrics file: `success_by_config.png`, `tokens_by_conf
 Tool descriptions contain the same action phrase the task generator puts in the clause, so Recall@5 is an upper view of retrieval under a controlled lexicon. Held-out variation is the template id, the slot values, the wrapper (`Please` versus `User request:`), and which steps are composed. Open-vocabulary paraphrases would be harder.
 
 The lexical policy reads that phrase. It shows how much of the task is solved once the right schema is inside the window. It is a deterministic stand-in for a careful reader with five tools, and the oracle row is the labeled upper bound under the same window. A generative instruct model is wired up and left out of the grid for CPU time and memory.
+
+The all-tools baseline scores 0% on seed 0 because the window keeps only the prefix of the shuffled catalog that fits, and that prefix did not contain the first gold tool of any held-out task. The scripted oracle, which may emit the labeled call only when that tool is visible, scores 0% on the same baseline and 100% once retrieval places the gold tool in the window. Retrieval success of 100% follows from the shared action phrase. The window size and retrieval depth were fixed before the test split was scored.
 
 History is placed after the tool list, so a tail truncation drops old observations before it drops the highest-ranked tools. Compaction therefore saves tokens on longer episodes and often leaves the visible tool set unchanged. Failure labels come from the episode trace and the state check: wrong tool, bad arguments, premature stop, loop, schema invalid, and budget exceeded.
 

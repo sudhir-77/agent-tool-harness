@@ -1,0 +1,10 @@
+{"task_id": "tpl001-i0", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
+{"task_id": "tpl001-i1", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
+{"task_id": "tpl001-i2", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
+{"task_id": "tpl001-i3", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
+{"task_id": "tpl001-i4", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
+{"task_id": "tpl039-i3", "config": "all_tools", "failure_type": "loop", "n_steps": 4, "wrong_tool": 2}
+{"task_id": "tpl039-i4", "config": "all_tools", "failure_type": "loop", "n_steps": 4, "wrong_tool": 2}
+{"task_id": "tpl041-i0", "config": "all_tools", "failure_type": "loop", "n_steps": 4, "wrong_tool": 2}
+{"task_id": "tpl041-i1", "config": "all_tools", "failure_type": "loop", "n_steps": 4, "wrong_tool": 2}
+{"task_id": "tpl041-i2", "config": "all_tools", "failure_type": "loop", "n_steps": 4, "wrong_tool": 2}

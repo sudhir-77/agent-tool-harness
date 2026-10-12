@@ -1,0 +1,5 @@
+{"task_id": "tpl001-i0", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
+{"task_id": "tpl001-i1", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
+{"task_id": "tpl001-i2", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
+{"task_id": "tpl001-i3", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
+{"task_id": "tpl001-i4", "config": "all_tools", "failure_type": "wrong_tool", "n_steps": 1, "wrong_tool": 1}
