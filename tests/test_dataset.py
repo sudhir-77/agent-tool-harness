@@ -70,14 +70,18 @@ def test_gold_plans_validate_parse_and_pass_the_checker(tools, tasks) -> None:
     for task in tasks:
         clauses = split_clauses(task["utterance"])
         assert len(clauses) == len(task["plan"])
-        for clause, step in zip(clauses, task["plan"]):
+        for clause, step in zip(clauses, task["plan"], strict=True):
             tool = by_name[step["tool"]]
             assert validate_call(
                 ToolCall(name=tool.name, arguments=step["arguments"]),
                 registry,
             )
             assert parse_args(clause, tool.parameters) == step["arguments"]
-            assert phrase_in_text(tool.phrase, clause)
+            if task["split"] == "dev":
+                assert phrase_in_text(tool.phrase, clause)
+            else:
+                assert not phrase_in_text(tool.phrase, clause)
+                assert tool.name not in clause
         assert replay_gold(task, registry, apps)
 
 

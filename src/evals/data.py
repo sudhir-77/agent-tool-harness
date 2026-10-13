@@ -98,6 +98,53 @@ def _check_file(path: Path, expected: str) -> None:
         raise RuntimeError(f"checksum mismatch for {path.name}")
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download_verified_stream(url: str, dest: Path, expected_sha256: str, session: Any | None = None) -> Path:
+    """Stream a large file to disk and verify sha256. Cached files are reused."""
+    if dest.exists() and sha256_file(dest) == expected_sha256:
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_suffix(dest.suffix + ".partial")
+    client = session if session is not None else requests
+    response = client.get(url, stream=True, timeout=120)
+    response.raise_for_status()
+    digest = hashlib.sha256()
+    written = 0
+    mark = 64 * 1024 * 1024
+    print(f"download start {dest.name}", flush=True)
+    try:
+        with partial.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if not chunk:
+                    continue
+                handle.write(chunk)
+                digest.update(chunk)
+                previous = written
+                written += len(chunk)
+                if written // mark != previous // mark:
+                    print(f"download {dest.name} {written // (1024 * 1024)} MiB", flush=True)
+        if digest.hexdigest() != expected_sha256:
+            raise RuntimeError(f"checksum mismatch for {url}: {digest.hexdigest()}")
+        if dest.exists():
+            dest.unlink()
+        partial.replace(dest)
+    except Exception:
+        partial.unlink(missing_ok=True)
+        raise
+    finally:
+        close = getattr(response, "close", None)
+        if close is not None:
+            close()
+    return dest
+
+
 def download_verified(url: str, dest: Path, expected_sha256: str, session: Any | None = None) -> Path:
     """Download with requests and verify sha256. Cached files are reused."""
     if dest.exists() and hashlib.sha256(dest.read_bytes()).hexdigest() == expected_sha256:

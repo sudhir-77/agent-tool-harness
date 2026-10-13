@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from evals.report import EPISODE_FIELDS
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -34,7 +36,8 @@ def test_quick_entrypoint() -> None:
     assert "success_by_config" in payload
     assert "all_tools" in payload["success_by_config"]
     header = (ROOT / "results" / "quick" / "episodes.csv").read_text(encoding="utf-8").splitlines()[0]
-    assert header == "task_id,split,config,success,n_steps,wrong_tool,schema_valid_calls,prompt_tokens,latency_ms,failure_type"
+    assert header == ",".join(EPISODE_FIELDS)
+    assert "agent" in header.split(",")
     retrieval = (ROOT / "results" / "quick" / "retrieval.csv").read_text(encoding="utf-8").splitlines()[0]
-    assert "gold_tool" in retrieval and "hit_at_5" in retrieval
+    assert "gold_tool" in retrieval and "hit_at_5" in retrieval and "instruction_mentions_tool" in retrieval
     assert (ROOT / "results" / "quick" / "success_by_config.png").exists()

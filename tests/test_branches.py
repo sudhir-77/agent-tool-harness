@@ -14,7 +14,7 @@ from evals.data import download_verified, verify_task_split
 from evals.failure import FAILURE_TYPES, classify_failure
 from evals.generate import build_tasks
 from evals.metrics import compare, mean, recall_at_5, retriever_for_config, token_reduction
-from evals.pipeline import run_pipeline
+from evals.pipeline import _keep_retriever, _release_embed, run_pipeline
 from evals.report import headline_recall
 from harness.context import render_tools
 from harness.llm import LexicalGroundingModel, ToolCall, to_openai_response
@@ -175,6 +175,22 @@ def test_download_checksum_mismatch(tmp_path) -> None:
         download_verified("https://example.test/x", tmp_path / "x.bin", "0" * 64, session=Session())
 
 
+def test_random5_is_sampled_without_a_fitted_retriever() -> None:
+    from evals.runner import evaluate_tasks
+
+    tools = build_tools()
+    task = build_tasks(tools, seed=0)[0]
+    episodes = evaluate_tasks(
+        [task],
+        tools,
+        {},
+        [{"name": "random5", "retriever": "random5", "compact": False}],
+        agent_kind="lexical_grounding",
+    )
+    assert len(episodes) == 1
+    assert episodes[0].config == "random5"
+
+
 def test_runner_rejects_unknown_agent_and_retriever() -> None:
     from evals.runner import evaluate_tasks
 
@@ -196,6 +212,33 @@ def test_runner_rejects_unknown_agent_and_retriever() -> None:
             [{"name": "bm25", "retriever": "bm25", "compact": False}],
             agent_kind="nope",
         )
+
+
+def test_embed_choice_is_frozen_before_release() -> None:
+    class Encoder:
+        def __init__(self) -> None:
+            self.model = object()
+            self._cache = {"q": 1}
+
+    class Retriever:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.encoder = Encoder()
+
+        def retrieve(self, query: str, k: int = 5) -> list[str]:
+            del k
+            return [f"{self.name}:{query}"]
+
+    retrievers = {"embed": Retriever("embed"), "bm25": Retriever("bm25")}
+    kept_bm25 = _keep_retriever(retrievers, "bm25", [])
+    assert kept_bm25 is retrievers["bm25"]
+    kept = _keep_retriever(retrievers, "embed", [{"utterance": "Please hello."}])
+    assert kept is not None
+    assert kept.retrieve("hello") == ["embed:hello"]
+    _release_embed(retrievers)
+    assert retrievers["embed"].encoder.model is None
+    assert retrievers["embed"].encoder._cache == {}
+    assert _keep_retriever({}, "embed", []) is None
 
 
 def test_encoder_wrapper_and_quick_pipeline(monkeypatch) -> None:

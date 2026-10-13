@@ -1,6 +1,6 @@
 # Agent harness for large tool spaces
 
-This project is a model-agnostic agent harness for multi-step tasks over a simulated ecosystem of 300+ app tools. It plans one call at a time, retrieves a small set of tool schemas, compacts older observations, and blocks side-effecting tools until the call is confirmed. Success is checked against the final app state. The same lexical policy is compared across retrieval strategies so the difference is the prompt, not a different model.
+This project is an agent harness for multi-step tasks over a simulated ecosystem of 300+ app tools. It plans one call at a time, retrieves a small set of tool schemas, compacts older observations, and blocks side-effecting tools until the call is confirmed. The reported agent is a local generative instruct model that emits the JSON tool call. Success is checked against the final app state.
 
 ## Setup
 
@@ -21,7 +21,7 @@ python run.py --quick
 python run.py --device cpu
 ```
 
-`python run.py` generates the dataset under `data/`, evaluates the held-out test templates, and writes `results/`. `python run.py --quick` runs the same pipeline on 8 test tasks and skips the embedding model so it finishes in a few minutes. Optional flags: `--skip-oracle`, `--skip-coverage`, `--device cuda` (falls back to CPU when CUDA is missing).
+`python run.py` generates the dataset under `data/`, downloads the Qwen2.5-1.5B-Instruct Q4_K_M GGUF (about 1 GB, cached under `data/models/`), evaluates the held-out test templates with that model, and writes `results/`. `python run.py --quick` runs the lexical comparison on 8 test tasks and skips the generative model and the embedding model so it finishes in a few minutes. Optional flags: `--skip-oracle`, `--skip-coverage`, `--device cpu`. The GGUF runtime uses the GPU when the installed llama.cpp wheel can offload layers, and otherwise uses CPU.
 
 ## Architecture
 
@@ -31,31 +31,31 @@ flowchart LR
   H --> RET[Tool retrieval: BM25 / embeddings / hierarchical app-to-tool]
   H --> CTX[Context manager: compaction + memory]
   H --> PG[Permission gate for side effects]
-  H --> M[Local policy behind an OpenAI-style tool call]
+  H --> M[Local Qwen instruct model, JSON tool call]
   H --> APPS[Simulated app state]
   APPS --> E[State-based eval + failure taxonomy]
 ```
 
-The loop builds a prompt, keeps only the tool blocks that fit in a 2048-token window, asks the policy for one call, validates it with JSON Schema, and runs the permission gate before any state change. Retrieval configurations place the top 5 tools in the prompt. The baseline places every schema in the prompt and does not compact history.
+The loop builds a prompt, keeps only the tool cards that fit in the model context (8,192 tokens, counted with the model tokenizer), asks the model for one JSON tool call, validates it with JSON Schema, retries once on a schema error, and runs the permission gate before any state change. Retrieval configurations place the top 5 tools in the prompt. The all-tools baseline places schemas in catalog order until the context budget is full and does not compact history. A second baseline places 5 tools chosen with a fixed seed.
 
 ## Design decisions
 
-- **One policy for every configuration.** The reported agent is lexical grounding: among tools whose full schema block fits in the window, it selects the tool whose action phrase appears in the current clause and copies `key=value` arguments from that clause. The scripted oracle is an upper bound that may emit the labeled call only when that tool is visible. Both speak the same OpenAI-style tool-call object.
-- **Context limit is fixed at 2048 tokens** and retrieval depth is fixed at 5. Those choices are constants in `harness/context.py`. They are not fit on the test split. The best row in the table is the pre-specified config with the highest test success, then the fewest prompt tokens, then the name.
+- **The reported agent is generative.** `Qwen/Qwen2.5-1.5B-Instruct` (Apache-2.0) runs locally from `qwen2.5-1.5b-instruct-q4_k_m.gguf` through llama.cpp, greedy decoding, seed 0. It must emit the tool call as JSON. The harness validates that object and may retry once. Lexical grounding and the scripted oracle are extra rows in `lexical_episodes.csv` and `oracle_episodes.csv`, labeled in the `agent` column. They are not the reported agent.
+- **Context limit is 8,192 tokens** for the generative model and retrieval depth is fixed at 5. The retriever used for the generative rows is chosen by Recall@5 on paraphrased dev instructions, not on the test split. The best row in the table is the evaluated config with the highest test success, then the fewest prompt tokens, then the name.
 - **Dev and test templates are disjoint.** Even template indexes are dev and odd indexes are test. `data/manifest.json` stores checksums. If the generator changes after the files exist, the run stops instead of silently rewriting the split.
-- **Prompt tokens are counted with a whitespace-and-punctuation tokenizer** (`harness/tokens.py`) so every configuration is measured the same way, including on the quick path before any model download. Counts add across prompt pieces because whitespace is not a token.
-- **Embeddings use frozen `sentence-transformers/all-MiniLM-L6-v2` vectors in a FAISS inner-product index.** The model is not trained on these tasks. `TransformersToolClient` can load a local instruct model behind the same interface. The ablation grid does not call it: scoring every test episode with a generative model on CPU would blow the time budget and the 3 GB memory cap.
+- **Prompt tokens for the reported agent are the model tokenizer counts** of the chat prompt actually sent (`usage.prompt_tokens`). The quick path still uses the whitespace tokenizer in `harness/tokens.py` because it does not load the GGUF.
+- **Embeddings use frozen `sentence-transformers/all-MiniLM-L6-v2` vectors in a FAISS inner-product index.** The encoder is not trained on these tasks. It is unloaded before the GGUF loads unless embedding retrieval won the dev paraphrase comparison.
 - **Side effects require `confirm=True`.** The gate returns `confirmation_required` and leaves state unchanged. The policy then repeats the call with confirmation. Executed side effects without confirmation are counted in `unconfirmed_side_effects`.
 
 ## Dataset
 
-The tool catalog and the 400 tasks are generated in process by `apps/catalog.py` and `evals/generate.py` (seed 0). There is no third-party task corpus and no user data. License: generated locally by this project. The run writes `data/tools.json`, `data/tasks.json`, and `data/manifest.json`, then checks row counts (at least 300 tools, 400 tasks, 40 dev templates, 40 test templates, disjoint template ids) and sha256 checksums. The MiniLM `config.json` is downloaded with `requests` and checked against a pinned sha256. MiniLM weights are fetched by sentence-transformers into `data/hf_home` on the full run. MiniLM is Apache 2.0.
+The tool catalog and the 400 tasks are generated in process by `apps/catalog.py` and `evals/generate.py` (seed 0). There is no third-party task corpus and no user data. License: generated locally by this project. The run writes `data/tools.json`, `data/tasks.json`, and `data/manifest.json`, then checks row counts (at least 300 tools, 400 tasks, 40 dev templates, 40 test templates, disjoint template ids) and sha256 checksums. The MiniLM `config.json` is downloaded with `requests` and checked against a pinned sha256. MiniLM weights are fetched by sentence-transformers into `data/hf_home` on the full run. MiniLM is Apache 2.0. The generative weights are `Qwen/Qwen2.5-1.5B-Instruct-GGUF` file `qwen2.5-1.5b-instruct-q4_k_m.gguf` (Apache 2.0), checked against a pinned sha256. On Windows the run also downloads the CUDA 12.4 cudart and cuBLAS redistributable DLLs (sha256 pinned) into `data/cuda/` so the llama.cpp wheel can use the GPU.
 
 Dev templates are a diagnostic (`results/dev_diagnostics.json`). Reported success, token, and Recall@5 numbers use test templates only.
 
 ## Results
 
-The table is written by `python run.py` from `results/metrics.json`. Recompute success as the mean of `success` in `results/episodes.csv` grouped by `config`. Recompute prompt tokens as the mean of `prompt_tokens`. Recompute schema-valid rate as the sum of `schema_valid_calls` divided by the sum of `n_steps` across `episodes.csv` and `oracle_episodes.csv`. Recompute Recall@5 as the mean of `hit_at_5` in `results/retrieval.csv` for the retriever used by the best config. `gate_log.csv` sums to `unconfirmed_side_effects`.
+The table is written by `python run.py` from `results/metrics.json`. `results/episodes.csv` is the reported generative agent (`agent` column). Recompute success as the mean of `success` grouped by `config`. Recompute prompt tokens as the mean of `prompt_tokens`. Recompute schema-valid rate as the sum of `schema_valid_calls` divided by the sum of `n_steps` in `episodes.csv`. Recompute Recall@5 as the mean of `hit_at_5` in `results/retrieval.csv` for the retriever used by the best config. On test rows, `instruction_mentions_tool` is 0 when the instruction does not contain the tool id or action phrase. `lexical_episodes.csv` and `oracle_episodes.csv` are the labeled comparison agents. `gate_log.csv` records unconfirmed side effects.
 
 <!-- RESULTS_START -->
 | Config | Task success | Prompt tokens / task | Mean wrong-tool calls |
@@ -89,11 +89,11 @@ Plots written next to the metrics file: `success_by_config.png`, `tokens_by_conf
 
 ## Limitations
 
-Tool descriptions contain the same action phrase the task generator puts in the clause, so Recall@5 is an upper view of retrieval under a controlled lexicon. Held-out variation is the template id, the slot values, the wrapper (`Please` versus `User request:`), and which steps are composed. Open-vocabulary paraphrases would be harder.
+Dev instructions still use the canonical action phrase. Test instructions use a separate caller sentence that does not contain that phrase or the tool id (`instruction_mentions_tool` is 0 on those rows). The same caller sentence is written on the tool card, so retrieval is matching documented wording, not unseen slang. Slot values stay in `key=value` form so the arguments are recoverable from the text.
 
-The lexical policy reads that phrase. It shows how much of the task is solved once the right schema is inside the window. It is a deterministic stand-in for a careful reader with five tools, and the oracle row is the labeled upper bound under the same window. A generative instruct model is wired up and left out of the grid for CPU time and memory.
+The generative model sees only the tools that fit in 8,192 tokens. The all-tools baseline keeps a catalog-order prefix of that window. A 1.5B model can still miss arguments, confirmation, or the right name when many cards are visible. If retrieval does not beat that baseline by 20 points, the results table says so.
 
-The all-tools baseline scores 0% on seed 0 because the window keeps only the prefix of the shuffled catalog that fits, and that prefix did not contain the first gold tool of any held-out task. The scripted oracle, which may emit the labeled call only when that tool is visible, scores 0% on the same baseline and 100% once retrieval places the gold tool in the window. Retrieval success of 100% follows from the shared action phrase. The window size and retrieval depth were fixed before the test split was scored.
+Lexical grounding remains a deterministic comparison: on a phrase-style clause it selects the visible tool whose action phrase matches, and on a paraphrase it falls back to BM25 over the visible cards. The oracle may emit the labeled call only when that tool is visible. Neither is the reported agent.
 
 History is placed after the tool list, so a tail truncation drops old observations before it drops the highest-ranked tools. Compaction therefore saves tokens on longer episodes and often leaves the visible tool set unchanged. Failure labels come from the episode trace and the state check: wrong tool, bad arguments, premature stop, loop, schema invalid, and budget exceeded.
 

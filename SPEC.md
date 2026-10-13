@@ -80,3 +80,33 @@ Same model with all tool schemas placed in the prompt, no retrieval and no conte
 - Built an agent harness over a simulated 300+-tool app ecosystem with tool retrieval, context compaction and permission gates, raising held-out multi-step task success from [BASE_SUCCESS]% to [SUCCESS]%
 - Reached [RECALL5] Recall@5 for next-tool retrieval while cutting prompt tokens per task by [TOKEN_CUT]%
 - Wrote state-based evals and a failure taxonomy (wrong tool, bad arguments, premature stop, loops) to drive harness changes
+
+## Scope change (2026-10-12, overrides earlier sections; reviewer)
+
+Iteration 1 was rejected in review: the reported agent was a deterministic lexical matcher, not a language model, the test
+instructions contain the tool's action phrase verbatim (so BM25/embedding retrieval is trivially perfect), and the
+all-tools baseline scores 0% only because its prompt cannot fit a 2,048-token window. Those numbers cannot go on a resume.
+Required changes:
+
+1. **A real generative model is the reported agent.** Use `Qwen/Qwen2.5-1.5B-Instruct` (Apache-2.0) locally, preferably as a
+   GGUF Q4_K_M file via `llama-cpp-python` (or transformers + CUDA torch). This machine has an NVIDIA RTX 3060 Laptop GPU
+   (6 GB VRAM, driver 616.92): use it when available, fall back to CPU. Greedy decoding, fixed seed. The model must emit
+   the tool call itself (JSON tool-call object); the harness may validate and retry once on schema errors (count retries).
+   Keep the lexical policy and the oracle only as extra rows labeled as such.
+2. **Paraphrased test instructions.** Test-template instructions must describe the goal in natural language that does
+   NOT contain the tool's action phrase or tool name verbatim (e.g. "push my 3pm with Dana to Friday" for
+   `calendar.reschedule_event`). Dev templates may be simpler. Add column `instruction_mentions_tool` (0/1) to
+   `results/retrieval.csv`; it must be 0 for at least 80% of test rows.
+3. **A fair baseline.** The baseline is the same LLM with all tool schemas in the prompt, truncated to the model's real
+   context budget you configure (use 8,192 tokens, counted with the model's own tokenizer for every config), in catalog
+   order. Also report a second baseline: same LLM with 5 random tools. Count tokens with the model tokenizer.
+4. **Grid size for time:** LLM rows on the 200 held-out test tasks for at least these configs: `all_tools`,
+   `random5`, best retriever without compaction, best retriever with compaction. Others may use 100 tasks.
+5. **Artifacts** (exact columns): `results/episodes.csv` adds `agent` (e.g. `qwen2.5-1.5b`, `lexical`, `oracle`),
+   `n_calls`, `schema_retries`; `results/retrieval.csv` as before plus `instruction_mentions_tool`;
+   `results/gate_log.csv` unchanged. `metrics.json` adds `llm_model`, `llm_device`, and `success_by_config` /
+   `tokens_per_task_by_config` for the LLM agent.
+6. **Resources:** host RAM peak under 4 GB; VRAM under 5.5 GB; total new downloads under 3 GB. Use a CUDA wheel only if it
+   installs cleanly; otherwise CPU with a reduced but documented grid. Disk is tight: do not keep duplicate model files.
+7. Report honestly: if retrieval or compaction does not beat the baseline by 20 points with the LLM, say so; do not tune
+   on test templates.

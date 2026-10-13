@@ -1,4 +1,5 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 torch==2.14.1+cpu
 numpy==2.2.6
 transformers==5.19.0
@@ -12,3 +13,4 @@ pytest-cov==7.1.0
 matplotlib==3.10.8
 psutil==7.2.2
 requests==2.34.2
+llama-cpp-python==0.3.36

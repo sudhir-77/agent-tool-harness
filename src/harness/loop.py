@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from harness.budget import StepBudget
-from harness.context import PromptPacket, RenderedTool, assemble_prompt
+from harness.context import PromptPacket, RenderedTool, assemble_prompt, compact_history
 from harness.llm import call_from_openai, split_clauses
 from harness.permissions import PermissionGate
 from harness.registry import ToolCall, ToolRegistry, ToolSpec
@@ -31,6 +31,9 @@ class EpisodeResult:
     prompt_tokens: int
     latency_ms: float
     failure_type: str
+    agent: str = ""
+    n_calls: int = 0
+    schema_retries: int = 0
     unconfirmed_side_effects: int = 0
     executed: list[str] = field(default_factory=list)
     hit_budget: bool = False
@@ -84,6 +87,7 @@ def run_episode(
     compact: bool,
     context_limit: int,
     max_steps: int = 16,
+    schema_retry_limit: int | None = None,
 ) -> EpisodeResult:
     started = time.perf_counter()
     history: list[str] = []
@@ -99,6 +103,9 @@ def run_episode(
     budget.start()
     seen_executions: set[tuple[str, str]] = set()
     looped = False
+    n_calls = 0
+    schema_retries = 0
+    invalid_streak = 0
 
     while True:
         reason = budget.tick()
@@ -116,16 +123,23 @@ def run_episode(
             compact=compact,
             context_limit=context_limit,
         )
-        prompt_tokens += packet.full_tokens
-        response = agent.complete(packet.visible, clause, history, n_ok, len(clauses))
+        shown_history = compact_history(history) if compact else list(history)
+        response = agent.complete(packet.visible, clause, shown_history, n_ok, len(clauses))
+        n_calls += 1
+        prompt_tokens += int(response.get("prompt_tokens", packet.full_tokens))
         call = call_from_openai(response)
         if call is None:
             break
         n_steps += 1
         if not validate_call(call, registry):
             schema_invalid = True
-            history.append(_history_line("SCHEMA_INVALID", call))
+            if schema_retry_limit is not None and invalid_streak >= schema_retry_limit:
+                break
+            invalid_streak += 1
+            schema_retries += 1
+            history.append(_history_line("SCHEMA_INVALID", call) + " fix the arguments to match the tool schema")
             continue
+        invalid_streak = 0
         schema_valid_calls += 1
         tool = registry.get(call.name)
         assert tool is not None
@@ -173,6 +187,9 @@ def run_episode(
         prompt_tokens=prompt_tokens,
         latency_ms=elapsed_ms,
         failure_type=failure,
+        agent=str(getattr(agent, "name", "")),
+        n_calls=n_calls,
+        schema_retries=schema_retries,
         unconfirmed_side_effects=unconfirmed,
         executed=[call.name for call in executed],
         hit_budget=hit_budget,

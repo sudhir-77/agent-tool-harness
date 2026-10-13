@@ -14,7 +14,7 @@ from evals.metrics import (
     success_gap_points,
     token_reduction,
 )
-from harness.context import assemble_prompt, compact_history, render_tools
+from harness.context import compact_history, render_tools
 from harness.llm import (
     PlannedCall,
     ScriptedOracle,

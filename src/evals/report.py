@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +11,6 @@ from evals.metrics import (
     recall_at_5,
     retriever_for_config,
     select_best,
-    success_gap_points,
     token_reduction,
 )
 
@@ -20,8 +18,11 @@ EPISODE_FIELDS = [
     "task_id",
     "split",
     "config",
+    "agent",
     "success",
     "n_steps",
+    "n_calls",
+    "schema_retries",
     "wrong_tool",
     "schema_valid_calls",
     "prompt_tokens",
@@ -37,6 +38,7 @@ RETRIEVAL_FIELDS = [
     "gold_tool",
     "rank",
     "hit_at_5",
+    "instruction_mentions_tool",
 ]
 
 
@@ -54,8 +56,11 @@ def episode_row(episode: Any) -> dict[str, Any]:
         "task_id": episode.task_id,
         "split": episode.split,
         "config": episode.config,
+        "agent": getattr(episode, "agent", ""),
         "success": episode.success,
         "n_steps": episode.n_steps,
+        "n_calls": getattr(episode, "n_calls", 0),
+        "schema_retries": getattr(episode, "schema_retries", 0),
         "wrong_tool": episode.wrong_tool,
         "schema_valid_calls": episode.schema_valid_calls,
         "prompt_tokens": episode.prompt_tokens,
@@ -120,6 +125,7 @@ def resume_figures(
     recall: float,
     n_tools: int,
     baseline: str = "all_tools",
+    agent: str = "",
 ) -> dict[str, Any]:
     return {
         "n_tools": n_tools,
@@ -128,6 +134,7 @@ def resume_figures(
         "best_success_pct": round(success[best] * 100.0, 1),
         "recall_at_5": round(recall, 3),
         "token_cut_pct": round(token_reduction(tokens, best, baseline) * 100.0, 1),
+        "agent": agent,
     }
 
 
@@ -142,21 +149,21 @@ def render_resume(figures: dict[str, Any]) -> str:
 
 ## Bullets
 
-- Built an agent harness over a simulated {n_tools}-tool app ecosystem with tool retrieval, context compaction, and permission gates, raising held-out multi-step task success from {base}% to {best}% ({config} versus the all-tools baseline, same lexical model).
-- Reached {recall} Recall@5 for next-tool retrieval while cutting prompt tokens per task by {cut}% versus putting every tool schema in the prompt.
+- Built an agent harness over a simulated {n_tools}-tool app ecosystem with tool retrieval, context compaction, and permission gates, raising held-out multi-step task success from {base}% to {best}% ({config} versus the all-tools baseline, same local generative model).
+- Reached {recall} Recall@5 for next-tool retrieval while cutting prompt tokens per task by {cut}% versus putting tool schemas in the prompt up to the model context budget.
 - Wrote state-based evals and a failure taxonomy (wrong tool, bad arguments, premature stop, loops) and labeled every held-out episode from the final app state.
 
 ## Skills and tools
 
-Python, pydantic, JSON Schema, BM25 (rank-bm25), sentence-transformers, FAISS, Hugging Face transformers, pytest, matplotlib.
+Python, pydantic, JSON Schema, BM25 (rank-bm25), sentence-transformers, FAISS, llama.cpp, Qwen instruct, pytest, matplotlib.
 
 ## Summary
 
-This project is a local agent harness that chooses tools for multi-step tasks over a simulated 12-app ecosystem. It compares BM25, embedding, and hierarchical retrieval against an all-tools prompt, with and without context compaction, and checks success from app state.
+This project is a local agent harness that asks a generative instruct model for one JSON tool call at a time over a simulated 12-app ecosystem. It compares retrieval and context compaction with an all-tools prompt and a random five-tool prompt, and checks success from app state.
 
 ## GitHub description
 
-Agent harness that retrieves tools, compacts context, and evaluates multi-step tasks over a 300+ tool simulated app ecosystem.
+Agent harness that retrieves tools, compacts context, and evaluates a local generative model on multi-step tasks over a 300+ tool simulated app ecosystem.
 """
 
 

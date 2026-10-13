@@ -17,8 +17,8 @@ import psutil
 
 from apps.catalog import APPS, build_tools
 from evals.checker import replay_gold
-from evals.data import ensure_minilm_config, save_dataset
-from evals.generate import build_tasks, split_tasks
+from evals.data import download_verified_stream, ensure_minilm_config, save_dataset
+from evals.generate import build_tasks, paraphrase_task, split_tasks
 from evals.metrics import (
     aggregate_episodes,
     recall_at_5,
@@ -27,6 +27,7 @@ from evals.metrics import (
     token_reduction,
 )
 from evals.report import (
+    EPISODE_FIELDS,
     RETRIEVAL_FIELDS,
     build_success_criteria,
     episode_row,
@@ -39,8 +40,23 @@ from evals.report import (
     write_csv,
 )
 from evals.runner import CONFIGS, QUICK_CONFIGS, evaluate_tasks, score_retrieval
+from harness.generative import (
+    CONTEXT_TOKENS,
+    GGUF_FILENAME,
+    GGUF_SHA256,
+    GGUF_URL,
+    LLM_MODEL_ID,
+    REPORTED_AGENT,
+    load_llama_backend,
+)
 from harness.registry import ToolRegistry
-from harness.retrieval import BM25Retriever, EmbeddingRetriever, HierarchicalRetriever, SentenceTransformerEncoder
+from harness.retrieval import (
+    BM25Retriever,
+    EmbeddingRetriever,
+    FrozenRetriever,
+    HierarchicalRetriever,
+    SentenceTransformerEncoder,
+)
 
 
 class PeakSampler:
@@ -114,6 +130,66 @@ def measure_coverage(root: Path) -> float | None:
     return float(payload["totals"]["percent_covered"]) / 100.0
 
 
+def choose_retriever(scores: dict[str, float]) -> str:
+    """Highest dev paraphrase recall. Ties prefer a retriever that is not the encoder."""
+
+    def rank(name: str) -> tuple[float, int, str]:
+        return (scores[name], 0 if name == "embed" else 1, name)
+
+    return max(scores, key=rank)
+
+
+def llm_configs(retriever: str) -> list[dict[str, Any]]:
+    return [
+        {"name": "all_tools", "retriever": None, "compact": False},
+        {"name": "random5", "retriever": "random5", "compact": False},
+        {"name": retriever, "retriever": retriever, "compact": False},
+        {"name": f"{retriever}_compact", "retriever": retriever, "compact": True},
+    ]
+
+
+def _mention_rate(rows: list[dict[str, Any]], split: str) -> float:
+    subset = [row for row in rows if row["split"] == split]
+    if not subset:
+        return 1.0
+    quiet = sum(1 for row in subset if int(row["instruction_mentions_tool"]) == 0)
+    return quiet / len(subset)
+
+
+def _freeze_retriever(retriever: Any, tasks: list[dict[str, Any]], k: int = 5) -> FrozenRetriever:
+    from harness.llm import split_clauses
+
+    mapping: dict[str, list[str]] = {}
+    for task in tasks:
+        for clause in split_clauses(task["utterance"]):
+            if clause not in mapping:
+                mapping[clause] = list(retriever.retrieve(clause, k=k))
+    return FrozenRetriever(str(retriever.name), mapping)
+
+
+def _keep_retriever(retrievers: dict[str, Any], chosen: str, tasks: list[dict[str, Any]]) -> Any | None:
+    retriever = retrievers.get(chosen)
+    if retriever is None:
+        return None
+    if chosen == "embed":
+        return _freeze_retriever(retriever, tasks)
+    return retriever
+
+
+def _release_embed(retrievers: dict[str, Any]) -> None:
+    embed = retrievers.get("embed")
+    if embed is None:
+        return
+    encoder = getattr(embed, "encoder", None)
+    if encoder is None:
+        return
+    cache = getattr(encoder, "_cache", None)
+    if isinstance(cache, dict):
+        cache.clear()
+    if hasattr(encoder, "model"):
+        encoder.model = None
+
+
 def _build_retrievers(tools: list[Any], names: set[str], data_dir: Path, device: str) -> dict[str, Any]:
     retrievers: dict[str, Any] = {}
     if "bm25" in names:
@@ -162,8 +238,14 @@ def run_pipeline(
         configs = QUICK_CONFIGS if quick else CONFIGS
         needed = {config["retriever"] for config in configs if config["retriever"]}
         retrievers = _build_retrievers(tools, needed, data_dir, device)
-        retrieval_rows = score_retrieval(eval_tasks, retrievers)
-        dev_rows = score_retrieval(dev, retrievers)
+        by_name = {tool.name: tool for tool in tools}
+        retrieval_rows = score_retrieval(eval_tasks, retrievers, tools)
+        dev_rows = score_retrieval(dev, retrievers, tools)
+        dev_para = [paraphrase_task(task, by_name) for task in dev]
+        dev_para_rows = score_retrieval(dev_para, retrievers, tools)
+        test_quiet = _mention_rate(retrieval_rows, "test")
+        if retrieval_rows and test_quiet < 0.80:
+            raise RuntimeError(f"test instructions mention the tool on too many rows: quiet_rate={test_quiet:.3f}")
         lexical = evaluate_tasks(
             eval_tasks, tools, retrievers, configs, agent_kind="lexical_grounding"
         )
@@ -172,7 +254,56 @@ def run_pipeline(
             oracle = evaluate_tasks(
                 eval_tasks, tools, retrievers, configs, agent_kind="scripted_oracle"
             )
-        # Drop the embedding model before coverage so the next process is not stacked on it.
+        reported_kind = "lexical_grounding"
+        reported = lexical
+        llm_device = device
+        llm_model = None
+        context_limit = 2048
+        para_recall = {
+            name: recall_at_5(dev_para_rows, name, split="dev")
+            for name in {row["retriever"] for row in dev_para_rows}
+        }
+        if not quick:
+            chosen = choose_retriever(para_recall)
+            # Freeze embeddings, then drop the encoder before the GGUF loads.
+            kept = _keep_retriever(retrievers, chosen, eval_tasks)
+            _release_embed(retrievers)
+            retrievers.clear()
+            gc.collect()
+            if kept is not None:
+                retrievers[chosen] = kept
+            model_path = download_verified_stream(
+                GGUF_URL,
+                data_dir / "models" / GGUF_FILENAME,
+                GGUF_SHA256,
+            )
+            backend = load_llama_backend(model_path, data_dir)
+            llm_device = backend.device
+            llm_model = LLM_MODEL_ID
+            context_limit = CONTEXT_TOKENS
+            print(
+                f"llm_model={llm_model} device={llm_device} retriever={chosen} "
+                f"dev_paraphrase_recall={para_recall}",
+                flush=True,
+            )
+            try:
+                reported = evaluate_tasks(
+                    eval_tasks,
+                    tools,
+                    retrievers,
+                    llm_configs(chosen),
+                    agent_kind="generative",
+                    generative_backend=backend,
+                    catalog_order=True,
+                    schema_retry_limit=1,
+                    context_limit=1_000_000,
+                )
+            finally:
+                backend.close()
+                del backend
+                gc.collect()
+            reported_kind = REPORTED_AGENT
+        # Drop retrievers before coverage so the next process is not stacked on them.
         retrievers.clear()
         gc.collect()
 
@@ -181,19 +312,19 @@ def run_pipeline(
             coverage = measure_coverage(root)
 
         lexical_rows = [episode_row(episode) for episode in lexical]
+        reported_rows = [episode_row(episode) for episode in reported]
         oracle_rows = [episode_row(episode) for episode in oracle]
-        summary = aggregate_episodes(lexical_rows)
+        summary = aggregate_episodes(reported_rows)
         success = summary["success_by_config"]
         tokens = summary["tokens_per_task_by_config"]
         best = select_best(success, tokens)
         gap = success_gap_points(success, best)
         reduction = token_reduction(tokens, best)
         recall, recall_by = headline_recall(retrieval_rows, best, split="test")
-        unconfirmed = int(sum(episode.unconfirmed_side_effects for episode in lexical))
+        unconfirmed = int(sum(episode.unconfirmed_side_effects for episode in reported))
         unconfirmed += int(sum(episode.unconfirmed_side_effects for episode in oracle))
-        scored_rows = lexical_rows + oracle_rows
-        n_scored_steps = sum(int(row["n_steps"]) for row in scored_rows)
-        n_scored_valid = sum(int(row["schema_valid_calls"]) for row in scored_rows)
+        n_scored_steps = sum(int(row["n_steps"]) for row in reported_rows)
+        n_scored_valid = sum(int(row["schema_valid_calls"]) for row in reported_rows)
         schema_rate = (n_scored_valid / n_scored_steps) if n_scored_steps else 1.0
         criteria = build_success_criteria(
             gap_points=gap,
@@ -209,6 +340,7 @@ def run_pipeline(
             best=best,
             recall=recall,
             n_tools=len(tools),
+            agent=reported_kind,
         )
         dev_recall = {name: recall_at_5(dev_rows, name, split="dev") for name in {row["retriever"] for row in dev_rows}}
         oracle_summary = aggregate_episodes(oracle_rows) if oracle_rows else {}
@@ -216,7 +348,9 @@ def run_pipeline(
             "project": "agent-tool-harness",
             "success_criteria": criteria,
             "metrics": {
-                "agent": "lexical_grounding",
+                "agent": reported_kind,
+                "llm_model": llm_model,
+                "llm_device": llm_device if llm_model else None,
                 "best_config": best,
                 "success_by_config": success,
                 "tokens_per_task_by_config": tokens,
@@ -226,6 +360,8 @@ def run_pipeline(
                 "recall_at_5": recall,
                 "recall_at_5_by_retriever": recall_by,
                 "dev_recall_at_5_by_retriever": dev_recall,
+                "dev_paraphrase_recall_at_5_by_retriever": para_recall,
+                "test_instruction_quiet_rate": test_quiet,
                 "token_reduction": reduction,
                 "success_gap_points": gap,
                 "unconfirmed_side_effects": unconfirmed,
@@ -233,7 +369,7 @@ def run_pipeline(
                 "n_test_tasks": len(eval_tasks),
                 "n_tools": len(tools),
                 "n_apps": len(apps),
-                "context_limit_tokens": 2048,
+                "context_limit_tokens": context_limit,
                 "retrieval_k": 5,
                 "seeds": [0],
                 "resume_numbers": figures,
@@ -245,11 +381,11 @@ def run_pipeline(
             },
             "baseline": {
                 "config": "all_tools",
-                "agent": "lexical_grounding",
+                "agent": reported_kind,
                 "success": success.get("all_tools", 0.0),
                 "tokens_per_task": tokens.get("all_tools", 0.0),
                 "description": (
-                    "Same lexical model with every tool schema in the prompt, "
+                    "Same agent with tool schemas in catalog order, truncated to the context budget, "
                     "no retrieval and no context compaction."
                 ),
             },
@@ -261,7 +397,7 @@ def run_pipeline(
                 }
             },
             "seeds": [0],
-            "hardware": _hardware(sampler.gb(), device),
+            "hardware": _hardware(sampler.gb(), llm_device if llm_model else device),
             "runtime_seconds": 0.0,
             "success_by_config": success,
             "recall_at_5": recall,
@@ -270,23 +406,39 @@ def run_pipeline(
             "schema_valid_rate": schema_rate,
             "n_test_tasks": len(eval_tasks),
         }
-        write_csv(out_dir / "episodes.csv", lexical_rows, [
-            "task_id", "split", "config", "success", "n_steps", "wrong_tool",
-            "schema_valid_calls", "prompt_tokens", "latency_ms", "failure_type",
-        ])
+        write_csv(out_dir / "episodes.csv", reported_rows, EPISODE_FIELDS)
+        if not quick and reported is not lexical:
+            write_csv(out_dir / "lexical_episodes.csv", lexical_rows, EPISODE_FIELDS)
         if oracle_rows:
-            write_csv(out_dir / "oracle_episodes.csv", oracle_rows, [
-                "task_id", "split", "config", "success", "n_steps", "wrong_tool",
-                "schema_valid_calls", "prompt_tokens", "latency_ms", "failure_type",
-            ])
+            write_csv(out_dir / "oracle_episodes.csv", oracle_rows, EPISODE_FIELDS)
         write_csv(out_dir / "retrieval.csv", retrieval_rows, RETRIEVAL_FIELDS)
         write_csv(out_dir / "dev_retrieval.csv", dev_rows, RETRIEVAL_FIELDS)
         gate_rows = [
-            {"task_id": episode.task_id, "config": episode.config, "agent": "lexical_grounding", "unconfirmed_side_effects": episode.unconfirmed_side_effects}
-            for episode in lexical
+            {
+                "task_id": episode.task_id,
+                "config": episode.config,
+                "agent": episode.agent,
+                "unconfirmed_side_effects": episode.unconfirmed_side_effects,
+            }
+            for episode in reported
         ]
+        if reported is not lexical:
+            gate_rows.extend(
+                {
+                    "task_id": episode.task_id,
+                    "config": episode.config,
+                    "agent": episode.agent,
+                    "unconfirmed_side_effects": episode.unconfirmed_side_effects,
+                }
+                for episode in lexical
+            )
         gate_rows.extend(
-            {"task_id": episode.task_id, "config": episode.config, "agent": "scripted_oracle", "unconfirmed_side_effects": episode.unconfirmed_side_effects}
+            {
+                "task_id": episode.task_id,
+                "config": episode.config,
+                "agent": episode.agent,
+                "unconfirmed_side_effects": episode.unconfirmed_side_effects,
+            }
             for episode in oracle
         )
         write_csv(
@@ -295,7 +447,7 @@ def run_pipeline(
             ["task_id", "config", "agent", "unconfirmed_side_effects"],
         )
         examples = []
-        for row in lexical_rows:
+        for row in reported_rows:
             if row["failure_type"] == "success":
                 continue
             seen = sum(1 for item in examples if item["failure_type"] == row["failure_type"])
@@ -315,7 +467,14 @@ def run_pipeline(
             encoding="utf-8",
         )
         (out_dir / "dev_diagnostics.json").write_text(
-            json.dumps({"recall_at_5_by_retriever": dev_recall, "seed": 0}, indent=2),
+            json.dumps(
+                {
+                    "recall_at_5_by_retriever": dev_recall,
+                    "paraphrase_recall_at_5_by_retriever": para_recall,
+                    "seed": 0,
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
         save_plots(

@@ -103,7 +103,7 @@ class FaissEmbeddingRetriever:
         faiss.normalize_L2(query)
         take = min(k, len(self.tools))
         scores, ids = self._index.search(query, take)
-        pairs = [(int(i), float(s)) for i, s in zip(ids[0], scores[0]) if int(i) >= 0]
+        pairs = [(int(i), float(s)) for i, s in zip(ids[0], scores[0], strict=True) if int(i) >= 0]
         pairs.sort(key=lambda pair: (-round(pair[1], 6), self.tools[pair[0]].name))
         return [self.tools[i].name for i, _ in pairs]
 
@@ -165,3 +165,14 @@ class _ArrayEncoder(Protocol):
     def encode_documents(self, texts: list[str]) -> np.ndarray: ...
 
     def encode_query(self, text: str) -> np.ndarray: ...
+
+
+class FrozenRetriever:
+    """Replay rankings captured before a heavy encoder is released."""
+
+    def __init__(self, name: str, mapping: dict[str, list[str]]) -> None:
+        self.name = name
+        self._mapping = {key: list(value) for key, value in mapping.items()}
+
+    def retrieve(self, query: str, k: int = 5) -> list[str]:
+        return list(self._mapping.get(query, []))[:k]

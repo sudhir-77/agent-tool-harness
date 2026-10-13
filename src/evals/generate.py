@@ -10,7 +10,8 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from harness.llm import split_clauses
+from apps.catalog import APPS, caller_text
+from harness.llm import phrase_in_text, split_clauses
 from harness.registry import ToolSpec
 
 SEED = 0
@@ -54,6 +55,26 @@ def render_clause(phrase: str, arguments: dict[str, Any], fields: list[str]) -> 
     for field in fields:
         parts.append(_render_value(field, arguments[field]))
     return " ".join(parts)
+
+
+def render_caller_clause(tool: ToolSpec, arguments: dict[str, Any]) -> str:
+    """Paraphrase used on test templates. Slot values stay in key=value form."""
+    noun = dict(APPS)[tool.app]
+    parts = [caller_text(tool.app, noun, tool.action)]
+    for field in tool.parameters["required"]:
+        parts.append(_render_value(field, arguments[field]))
+    clause = " ".join(parts)
+    if phrase_in_text(tool.phrase, clause) or tool.name in clause:
+        raise RuntimeError(f"test clause mentions {tool.name}")
+    return clause
+
+
+def paraphrase_task(task: dict[str, Any], by_name: dict[str, ToolSpec]) -> dict[str, Any]:
+    """Same plan and split, with every step rewritten in caller wording."""
+    clauses = [render_caller_clause(by_name[step["tool"]], dict(step["arguments"])) for step in task["plan"]]
+    copied = dict(task)
+    copied["utterance"] = f"User request: {' THEN '.join(clauses)}."
+    return copied
 
 
 def template_specs() -> list[list[str]]:
@@ -137,7 +158,10 @@ def build_tasks(tools: list[ToolSpec], seed: int = SEED) -> list[dict[str, Any]]
                 fields = list(tool.parameters["required"])
                 arguments = {field: _sample_value(field, rng, title) for field in fields}
                 plan.append({"tool": tool.name, "arguments": arguments})
-                clauses.append(render_clause(tool.phrase, arguments, fields))
+                if split == "test":
+                    clauses.append(render_caller_clause(tool, arguments))
+                else:
+                    clauses.append(render_clause(tool.phrase, arguments, fields))
                 expectations.append(
                     {
                         "app": tool.app,
