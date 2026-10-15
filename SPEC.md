@@ -110,3 +110,8 @@ Required changes:
    installs cleanly; otherwise CPU with a reduced but documented grid. Disk is tight: do not keep duplicate model files.
 7. Report honestly: if retrieval or compaction does not beat the baseline by 20 points with the LLM, say so; do not tune
    on test templates.
+
+
+## Environment rule (2026-10-15, overrides earlier sections; reviewer)
+Never start, stop or restart Docker Desktop, WSL (wsl --shutdown, wsl --terminate) or any Windows service from project code or from your own commands. If `docker info` fails, exit with a clear error message instead. The reviewer keeps Docker running.
+

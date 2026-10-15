@@ -20,3 +20,4 @@ build/
 .hf_cache/
 *.log
 results/coverage.json
+EVALUATION_*.md
