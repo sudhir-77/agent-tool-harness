@@ -1,8 +1,13 @@
 {
   "recall_at_5_by_retriever": {
+    "embed": 0.9878048780487805,
+    "bm25": 1.0,
+    "hierarchical": 1.0
+  },
+  "paraphrase_recall_at_5_by_retriever": {
     "embed": 1.0,
-    "hierarchical": 1.0,
-    "bm25": 1.0
+    "bm25": 1.0,
+    "hierarchical": 1.0
   },
   "seed": 0
 }

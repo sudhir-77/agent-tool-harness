@@ -327,7 +327,10 @@ class LlamaToolBackend:
             n_gpu_layers=layers,
             n_threads=4,
             n_threads_batch=4,
-            n_batch=512,
+            # One batch for the whole context. Smaller CUDA batches changed
+            # argmax on the long all-tools prompt between processes.
+            n_batch=n_ctx,
+            n_ubatch=n_ctx,
             seed=0,
             verbose=False,
             use_mmap=True,
